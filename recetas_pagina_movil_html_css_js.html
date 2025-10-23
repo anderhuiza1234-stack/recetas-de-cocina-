@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Recetario Móvil — Paso a Paso</title>
+  <style>
+    /* ===== Reset & base (mobile-first) ===== */
+    :root{
+      --bg:#faf8f6; --card:#ffffff; --muted:#6b6b6b; --accent:#ff6b35; --accent-2:#ffb86b; --glass: rgba(255,255,255,0.7);
+      --shadow: 0 6px 18px rgba(20,20,20,0.08);
+      font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#fff 0%, var(--bg) 100%); color:#111; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale}
+
+    header{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--card);box-shadow:var(--shadow);position:sticky;top:0;z-index:40}
+    header h1{font-size:18px;margin:0}
+    .search{flex:1;display:flex;align-items:center;background:var(--bg);padding:8px 10px;border-radius:12px}
+    .search input{border:0;background:transparent;outline:0;font-size:15px;width:100%}
+    .chip{padding:8px 10px;border-radius:999px;background:transparent;border:1px solid #eee;font-size:13px}
+
+    main{padding:12px}
+    .filters{display:flex;gap:8px;overflow:auto;padding-bottom:8px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+    .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center}
+    .thumb{width:72px;height:72px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-size:28px}
+    .meta{flex:1}
+    .meta h3{margin:0 0 6px 0;font-size:15px}
+    .meta p{margin:0;font-size:13px;color:var(--muted)}
+    .fav{font-size:18px;padding:6px;border-radius:8px}
+
+    /* Modal / panel */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:none;z-index:50}
+    .panel{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,var(--card),var(--glass));border-top-left-radius:16px;border-top-right-radius:16px;padding:12px;max-height:88vh;overflow:auto;box-shadow:0 -10px 30px rgba(0,0,0,0.15);display:none;z-index:51}
+    .panel .title{display:flex;justify-content:space-between;align-items:center}
+    .ingredients, .steps{margin-top:12px}
+    .step{background:#fff;padding:10px;border-radius:10px;margin-bottom:8px;border:1px solid #f1f1f1}
+    .step h4{margin:0;font-size:14px}
+    .controls{display:flex;gap:8px;margin-top:10px}
+    .btn{flex:1;padding:10px;border-radius:10px;border:0;font-weight:600}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:white}
+    .btn.ghost{background:transparent;border:1px solid #eee}
+
+    /* step-focused mode */
+    .step-mode{position:fixed;inset:0;background:var(--card);display:none;flex-direction:column;z-index:60}
+    .step-mode .content{flex:1;display:grid;place-items:center;padding:28px;text-align:center}
+    .step-mode .nav{display:flex;gap:8px;padding:12px}
+
+    /* utilities */
+    .tag{display:inline-block;padding:6px 8px;border-radius:999px;border:1px dashed #eee;font-size:12px;margin-right:6px}
+    .small{font-size:13px;color:var(--muted)}
+
+    @media(min-width:700px){
+      .grid{grid-template-columns:repeat(3,1fr)}
+      header h1{font-size:20px}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(180deg,var(--accent),var(--accent-2));display:grid;place-items:center;color:white;font-weight:700">R</div>
+    <h1>Recetario — Paso a Paso</h1>
+    <div style="width:8px"></div>
+  </header>
+
+  <main>
+    <div class="search" role="search">
+      <input id="q" placeholder="Buscar receta, ingrediente o tipo (ej: vegano)" />
+    </div>
+
+    <div class="filters" id="filters">
+      <!-- tags inserted by JS -->
+    </div>
+
+    <section class="grid" id="grid"></section>
+  </main>
+
+  <div class="overlay" id="overlay"></div>
+  <aside class="panel" id="panel" aria-hidden="true">
+    <!-- recipe details injected by JS -->
+  </aside>
+
+  <section class="step-mode" id="stepMode" aria-hidden="true">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #eee">
+      <button id="closeStep" class="btn ghost" style="width:56px">Cerrar</button>
+      <div style="font-weight:700">Modo Paso a Paso</div>
+      <div style="flex:1"></div>
+      <div id="stepTimerDisplay" class="small"></div>
+    </div>
+    <div class="content" id="stepContent"></div>
+    <div class="nav">
+      <button id="prevStep" class="btn ghost">Anterior</button>
+      <button id="nextStep" class="btn primary">Siguiente</button>
+    </div>
+  </section>
+
+  <script>
+    /* ===== Recipes data ===== */
+    const RECIPES = [
+      {
+        id: 'pancakes', title: 'Panqueques esponjosos', minutes: 20, servings: 3, tags:['desayuno','vegetariano'],
+        img: '🥞',
+        ingredients: [ '1 taza de harina', '1 huevo', '1 taza de leche', '1 cda de azúcar', '1 cdita de polvo de hornear', 'pizca de sal', 'mantequilla para cocinar' ],
+        steps: [
+          'En un bol mezcla la harina, azúcar, polvo de hornear y sal.',
+          'En otro bol bate el huevo y mezcla con la leche.',
+          'Vierte lo líquido sobre lo seco y mezcla hasta integrar (no batir en exceso).',
+          'Calienta una sartén y engrasa ligeramente con mantequilla.',
+          'Vierte porciones y cocina 1-2 minutos por lado hasta dorar. Sirve con miel o fruta.'
+        ]
+      },
+      {
+        id: 'guacamole', title: 'Guacamole clásico', minutes: 10, servings: 4, tags:['aperitivo','vegano','rápido'],
+        img: '🥑',
+        ingredients: ['3 aguacates maduros','1 tomate pequeño picado','1/2 cebolla morada picada','jugo de 1 lima','cilantro al gusto','sal y pimienta'],
+        steps:[
+          'Corta los aguacates y aplástalos con un tenedor hasta obtener una textura cremosa con trozos.',
+          'Agrega tomate, cebolla y cilantro. Mezcla.',
+          'Añade jugo de lima, sal y pimienta al gusto. Prueba y ajusta sazón.'
+        ]
+      },
+      {
+        id: 'spaghetti', title: 'Spaghetti con salsa tomate y albahaca', minutes: 30, servings: 4, tags:['pasta','vegetariano'],
+        img: '🍝',
+        ingredients:['400 g spaghetti','400 g tomate triturado o salsa','2 dientes de ajo','1 cebolla pequeña','albahaca fresca','aceite de oliva','sal y pimienta'],
+        steps:[
+          'Cuece la pasta según instrucciones y reserva 1 taza de agua de cocción.',
+          'Sofríe ajo y cebolla en aceite hasta transparente.',
+          'Agrega tomate triturado, sal y cocina 8-10 min. Si está muy espesa, añade agua de cocción.',
+          'Mezcla la pasta con la salsa y añade albahaca fresca antes de servir.'
+        ]
+      },
+      {
+        id: 'salmon', title: 'Salmón al horno con limón', minutes: 25, servings: 2, tags:['principal','pescado','saludable'],
+        img: '🐟',
+        ingredients:['2 filetes de salmón','1 limón en rodajas','aceite de oliva','sal y pimienta','hierbas (eneldo o perejil)'],
+        steps:[
+          'Precalienta el horno a 200°C.',
+          'Coloca los filetes en una bandeja, salpimienta y rocía aceite.',
+          'Cubre con rodajas de limón y hornea 12-15 minutos según grosor.',
+          'Retira y espolvorea hierbas frescas.'
+        ]
+      },
+      {
+        id: 'vegan-curry', title: 'Curry de garbanzos (vegano)', minutes: 40, servings: 4, tags:['vegano','principal'],
+        img: '🍛',
+        ingredients:['2 tazas garbanzos cocidos','1 lata leche de coco','1 cebolla','2 dientes ajo','1 cda curry en polvo','verduras al gusto (papa, zanahoria, espinaca)'],
+        steps:[
+          'Sofríe cebolla y ajo hasta transparente.',
+          'Agrega curry en polvo y mezcla 1 minuto.',
+          'Incorpora las verduras y garbanzos, añade leche de coco y cocina 15-20 minutos hasta que estén tiernas.',
+          'Ajusta sal y sirve con arroz.'
+        ]
+      },
+      {
+        id: 'empanadas', title: 'Empanadas al horno (rápidas)', minutes: 60, servings: 8, tags:['horno','snack'],
+        img: '🥟',
+        ingredients:['12 tapas para empanadas','400 g carne picada o pollo desmenuzado','1 cebolla','aceite','condimentos','1 huevo para pincelar'],
+        steps:[
+          'Sofríe la cebolla y la carne hasta cocinar. Condimenta al gusto.',
+          'Rellena las tapas, cierra y sella con tenedor.',
+          'Pincela con huevo y hornea 20-25 minutos a 200°C hasta dorar.'
+        ]
+      },
+      {
+        id: 'ensalada', title: 'Ensalada fresca mediterránea', minutes: 15, servings: 2, tags:['ensalada','rápido','saludable'],
+        img: '🥗',
+        ingredients:['lechuga o mezcla de hojas','tomate cherry','pepino','aceitunas','queso feta opcional','vinagreta'],
+        steps:[
+          'Corta y mezcla los vegetales en un bol grande.',
+          'Agrega aceitunas y queso si deseas.',
+          'Aliña con vinagreta al gusto y sirve inmediatamente.'
+        ]
+      }
+    ];
+
+    /* ===== State & persistence ===== */
+    const state = {
+      q: '', tag: null, favorites: new Set(JSON.parse(localStorage.getItem('fav')||'[]')), currentRecipe: null, stepIndex:0
+    };
+
+    /* ===== DOM refs ===== */
+    const grid = document.getElementById('grid');
+    const qInput = document.getElementById('q');
+    const filters = document.getElementById('filters');
+    const overlay = document.getElementById('overlay');
+    const panel = document.getElementById('panel');
+    const stepMode = document.getElementById('stepMode');
+    const stepContent = document.getElementById('stepContent');
+    const nextStepBtn = document.getElementById('nextStep');
+    const prevStepBtn = document.getElementById('prevStep');
+    const closeStep = document.getElementById('closeStep');
+    const stepTimerDisplay = document.getElementById('stepTimerDisplay');
+
+    /* ===== Helpers ===== */
+    function saveFavs(){ localStorage.setItem('fav', JSON.stringify(Array.from(state.favorites))); }
+    function byQueryAndTag(r){
+      const q = state.q.trim().toLowerCase();
+      if(state.tag && !r.tags.includes(state.tag)) return false;
+      if(!q) return true;
+      return r.title.toLowerCase().includes(q) || r.ingredients.join(' ').toLowerCase().includes(q) || r.tags.join(' ').includes(q);
+    }
+
+    /* ===== Render filters ===== */
+    function renderFilters(){
+      const tags = new Set(); RECIPES.forEach(r=>r.tags.forEach(t=>tags.add(t)));
+      filters.innerHTML = '';
+      const all = document.createElement('button'); all.className='chip'; all.textContent='Todos';
+      all.onclick = ()=>{ state.tag = null; render(); };
+      filters.appendChild(all);
+      Array.from(tags).sort().forEach(t=>{
+        const btn = document.createElement('button'); btn.className='chip'; btn.textContent=t; btn.onclick=()=>{ state.tag = t; render(); };
+        filters.appendChild(btn);
+      });
+    }
+
+    /* ===== Render grid ===== */
+    function render(){
+      renderFilters();
+      grid.innerHTML='';
+      RECIPES.filter(byQueryAndTag).forEach(r=>{
+        const el = document.createElement('article'); el.className='card';
+        el.innerHTML = `
+          <div class="thumb">${r.img}</div>
+          <div class="meta">
+            <h3>${r.title}</h3>
+            <p class="small">${r.minutes} min • ${r.servings} raciones</p>
+            <div style="margin-top:8px">${r.tags.map(t=>`<span class='tag'>${t}</span>`).join('')}</div>
+          </div>
+          <button class="fav" data-id="${r.id}">`+(state.favorites.has(r.id)?'★':'☆')+`</button>
+        `;
+        el.onclick = (e)=>{ if(e.target && e.target.classList.contains('fav')){ toggleFav(r.id, e.target); e.stopPropagation(); } else openRecipe(r.id); };
+        grid.appendChild(el);
+      });
+    }
+
+    function toggleFav(id, btn){
+      if(state.favorites.has(id)) { state.favorites.delete(id); btn.textContent='☆'; }
+      else { state.favorites.add(id); btn.textContent='★'; }
+      saveFavs();
+    }
+
+    /* ===== Open recipe panel ===== */
+    function openRecipe(id){
+      const r = RECIPES.find(x=>x.id===id); if(!r) return;
+      state.currentRecipe = r; state.stepIndex = 0; panel.innerHTML = '';
+      const header = document.createElement('div'); header.className='title';
+      header.innerHTML = `<div>
+        <h2 style="margin:0">${r.title}</h2>
+        <div class="small">${r.minutes} min • ${r.servings} raciones</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <div style="font-size:28px">${r.img}</div>
+        <button id='favPanel' class='fav'>`+(state.favorites.has(r.id)?'★':'☆')+`</button>
+      </div>`;
+      panel.appendChild(header);
+
+      const ing = document.createElement('div'); ing.className='ingredients';
+      ing.innerHTML = `<h3>Ingredientes</h3><ul>${r.ingredients.map(i=>`<li>${i}</li>`).join('')}</ul>`;
+      panel.appendChild(ing);
+
+      const steps = document.createElement('div'); steps.className='steps';
+      steps.innerHTML = `<h3>Pasos</h3>${r.steps.map((s,idx)=>`<div class='step'><h4>Paso ${idx+1}</h4><p class='small'>${s}</p></div>`).join('')}`;
+      panel.appendChild(steps);
+
+      const controls = document.createElement('div'); controls.className='controls';
+      controls.innerHTML = `<button id='startStep' class='btn primary'>Iniciar modo paso a paso</button><button id='closePanel' class='btn ghost'>Cerrar</button>`;
+      panel.appendChild(controls);
+
+      document.getElementById('favPanel').onclick = function(ev){ toggleFav(r.id, this); ev.stopPropagation(); };
+      document.getElementById('startStep').onclick = ()=>{ openStepMode(r); };
+      document.getElementById('closePanel').onclick = closePanel;
+
+      overlay.style.display='block'; panel.style.display='block'; panel.setAttribute('aria-hidden','false');
+    }
+    function closePanel(){ overlay.style.display='none'; panel.style.display='none'; panel.setAttribute('aria-hidden','true'); }
+    overlay.onclick = closePanel;
+
+    /* ===== Step mode ===== */
+    let timer = null; let timerRemaining = 0;
+    function openStepMode(r){
+      stepMode.style.display='flex'; stepMode.setAttribute('aria-hidden','false'); updateStepContent();
+    }
+    function closeStepMode(){ stepMode.style.display='none'; stepMode.setAttribute('aria-hidden','true'); clearTimer(); }
+    closeStep.onclick = closeStepMode;
+
+    function updateStepContent(){
+      const r = state.currentRecipe; if(!r) return;
+      const s = r.steps[state.stepIndex];
+      stepContent.innerHTML = `
+        <div>
+          <div style="font-size:48px;margin-bottom:8px">${r.img}</div>
+          <h2 style="margin:0">Paso ${state.stepIndex+1} de ${r.steps.length}</h2>
+          <p class="small" style="margin-top:8px">${s}</p>
+        </div>
+      `;
+      // update nav buttons
+      prevStepBtn.disabled = state.stepIndex === 0;
+      nextStepBtn.textContent = state.stepIndex === r.steps.length-1 ? 'Finalizar' : 'Siguiente';
+    }
+
+    function nextStep(){
+      const r = state.currentRecipe; if(!r) return;
+      if(state.stepIndex < r.steps.length -1){ state.stepIndex++; updateStepContent(); }
+      else{ // finished
+        alert('¡Completaste la receta! 🎉'); closeStepMode();
+      }
+    }
+    function prevStep(){ if(state.stepIndex>0){ state.stepIndex--; updateStepContent(); } }
+    nextStepBtn.onclick = nextStep; prevStepBtn.onclick = prevStep;
+
+    /* ===== Simple timer for a step (optional) ===== */
+    function startTimer(minutes){ clearTimer(); timerRemaining = minutes*60; updateTimerDisplay();
+      timer = setInterval(()=>{ timerRemaining--; if(timerRemaining<=0){ clearTimer(); alert('Tiempo terminado! ⏰'); } updateTimerDisplay(); },1000);
+    }
+    function clearTimer(){ if(timer) clearInterval(timer); timer=null; stepTimerDisplay.textContent=''; }
+    function updateTimerDisplay(){ const m = Math.floor(timerRemaining/60); const s = timerRemaining%60; stepTimerDisplay.textContent = `Temporizador: ${m}:${String(s).padStart(2,'0')}`; }
+
+    // Double-tap a step in the panel to set a 5-min timer (mobile-friendly)
+    panel.addEventListener('dblclick', (e)=>{
+      const r = state.currentRecipe; if(!r) return; startTimer(5);
+    });
+
+    /* ===== Search handling ===== */
+    qInput.addEventListener('input', (e)=>{ state.q = e.target.value; render(); });
+
+    /* ===== Init ===== */
+    render();
+
+    // Small keyboard accessibility: Enter when focused on recipe starts step mode
+    document.addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter' && state.currentRecipe) openStepMode(state.currentRecipe);
+    });
+
+    // Touch-friendly: long press on card to favorite (mobile)
+    let touchTimer = null;
+    grid.addEventListener('touchstart', (ev)=>{
+      const card = ev.target.closest('.card'); if(!card) return;
+      touchTimer = setTimeout(()=>{ const id = card.querySelector('.fav').getAttribute('data-id'); toggleFav(id, card.querySelector('.fav')); },600);
+    });
+    grid.addEventListener('touchend', ()=>{ if(touchTimer) clearTimeout(touchTimer); });
+
+    // expose some helpers for dev console
+    window.RecipeApp = {RECIPES, openRecipe, toggleFav};
+
+  </script>
+</body>
+</html>
